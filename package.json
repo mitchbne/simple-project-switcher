@@ -6,7 +6,7 @@
     "publisher": "mitchbne",
     "repository": {
         "type": "git",
-        "url": "https://github.com/calebporzio/simple-project-switcher.git"
+        "url": "https://github.com/mitchbne/simple-project-switcher.git"
     },
     "engines": {
         "vscode": "^1.44.0"
@@ -27,10 +27,9 @@
                     "type": "boolean",
                     "default": true
                 },
-                "simple-project-switcher.directory": {
-                    "type": "string",
-                    "default": null,
-                    "description": "Your local projects directory to scan from."
+                "simple-project-switcher.projectDirectories": {
+                    "type": "array",
+                    "description": "Your local project directories to scan from."
                 }
             }
         },
