@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (event.focused) updateMostRecentProject(context, currentProjectDirectory)
       })
     }
-    let disposable = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
+    let switchCommand = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
       let recentlyAccessedProjects = context.globalState.get("simple-project-switcher.recent", [])
 
       if (!vscode.workspace.workspaceFolders && !recentlyAccessedProjects) {
@@ -55,12 +55,21 @@ export function activate(context: vscode.ExtensionContext) {
       quickPick.show()
     })
 
-    context.subscriptions.push(disposable)
+    let clearCacheCommand = vscode.commands.registerCommand("simple-project-switcher.clear_cache", () => {
+      context.globalState.update("simple-project-switcher.recent", [])
+    })
+
+    context.subscriptions.push(switchCommand)
+    context.subscriptions.push(clearCacheCommand)
   } catch (error) {
-    let disposable = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
+    let switchCommand = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
       vscode.window.showErrorMessage(error.message)
     })
-    context.subscriptions.push(disposable)
+    let clearCacheCommand = vscode.commands.registerCommand("simple-project-switcher.clear_cache", () => {
+      vscode.window.showErrorMessage(error.message)
+    })
+    context.subscriptions.push(switchCommand)
+    context.subscriptions.push(clearCacheCommand)
   }
 }
 

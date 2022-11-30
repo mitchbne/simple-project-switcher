@@ -2,7 +2,7 @@
     "name": "simple-project-switcher",
     "displayName": "Simple Project Switcher",
     "description": "An extension to switch between projects in VS Code",
-    "version": "0.1.6",
+    "version": "0.1.7",
     "publisher": "mitchbne",
     "repository": {
         "type": "git",
@@ -37,7 +37,11 @@
             {
                 "command": "simple-project-switcher.switch",
                 "title": "Simple Project Switcher: Switch Project"
-            }
+              },
+              {
+                "command": "simple-project-switcher.clear_cache",
+                "title": "Simple Project Switcher: Clear Cache"
+              }
         ],
         "keybindings": [
             {
