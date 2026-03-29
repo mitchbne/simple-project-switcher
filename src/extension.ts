@@ -12,13 +12,17 @@ export function activate(context: vscode.ExtensionContext) {
   try {
     validateConfig(context)
     // Check if current window path is a project directory. If so, add it to the recent projects list.
-    const currentWindowPath = normalizePath(vscode.workspace.workspaceFolders[0].uri.path)
-    const relativeProjectDirectory = normalizePath(
-      config(PROJECT_DIRECTORTIES_SETTING_KEY, []).find(directory => {
-        const normalizedDirectory = normalizePath(directory)
-        return currentWindowPath.startsWith(normalizedDirectory)
-      }) || ""
-    )
+    const currentWindowPath = vscode.workspace.workspaceFolders?.[0]
+      ? normalizePath(vscode.workspace.workspaceFolders[0].uri.path)
+      : undefined
+    const relativeProjectDirectory = currentWindowPath
+      ? normalizePath(
+          config(PROJECT_DIRECTORTIES_SETTING_KEY, []).find(directory => {
+            const normalizedDirectory = normalizePath(directory)
+            return currentWindowPath.startsWith(normalizedDirectory)
+          }) || ""
+        )
+      : ""
     if (relativeProjectDirectory) {
       const currentProjectDirectory = pathRelativeToProjectDirectory(relativeProjectDirectory, currentWindowPath)
       updateMostRecentProject(context, currentProjectDirectory)
@@ -27,14 +31,19 @@ export function activate(context: vscode.ExtensionContext) {
       })
     }
     let switchCommand = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
-      let recentlyAccessedProjects = context.globalState.get("simple-project-switcher.recent", [])
+      let projects = getProjectsFromDirectories(config(PROJECT_DIRECTORTIES_SETTING_KEY, []))
+      let validProjectKeys = new Set(Object.keys(projects))
 
-      if (!vscode.workspace.workspaceFolders && !recentlyAccessedProjects) {
+      if (!vscode.workspace.workspaceFolders && validProjectKeys.size === 0) {
         vscode.window.showErrorMessage("Project Switcher requires at least one folder to be open.")
         return
       }
 
-      let projects = getProjectsFromDirectories(config(PROJECT_DIRECTORTIES_SETTING_KEY, []))
+      let recentlyAccessedProjects = context.globalState
+        .get("simple-project-switcher.recent", [])
+        .filter(p => validProjectKeys.has(p))
+      context.globalState.update("simple-project-switcher.recent", recentlyAccessedProjects)
+
       let projectsSortedByRecentlyAccessed = Array.from(new Set(recentlyAccessedProjects.concat(Object.keys(projects))))
 
       const quickPick = vscode.window.createQuickPick()
