@@ -9,6 +9,7 @@
         "url": "https://github.com/mitchbne/simple-project-switcher.git"
     },
     "engines": {
+        "node": ">=24",
         "vscode": "^1.44.0"
     },
     "categories": [
@@ -74,7 +75,7 @@
     "devDependencies": {
         "typescript": "^2.5.3",
         "vscode": "^1.1.5",
-        "@types/node": "^7.0.43",
+        "@types/node": "^24.0.0",
         "@types/mocha": "^2.2.42"
     },
     "dependencies": {
