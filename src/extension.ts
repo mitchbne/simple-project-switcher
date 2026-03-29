@@ -1,189 +1,203 @@
 "use strict"
 
 import * as vscode from "vscode"
+import { existsSync, statSync, readdirSync } from "fs"
+import { join, relative } from "path"
+import untildify = require("untildify")
 
-const { existsSync, statSync, readdirSync } = require("fs")
-const { join, relative } = require("path")
-const untildify = require("untildify")
+const SETTING_PROJECT_DIRECTORIES = "simple-project-switcher.projectDirectories"
+const STATE_RECENT_PROJECTS = "simple-project-switcher.recent"
+const STATE_FOCUSED_PROJECT = "simple-project-switcher.focused"
+const MAX_SCAN_DEPTH = 5
 
-const PROJECT_DIRECTORTIES_SETTING_KEY = "simple-project-switcher.projectDirectories"
+// --- Activation ---
 
-export function activate(context: vscode.ExtensionContext) {
+export function activate(context: vscode.ExtensionContext): void {
   trackCurrentProject(context)
 
-  let switchCommand = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
-    const directories = config(PROJECT_DIRECTORTIES_SETTING_KEY, [])
-    if (!directories.length) {
-      vscode.window.showErrorMessage(
-        `The simple-project-switcher extension requires '${PROJECT_DIRECTORTIES_SETTING_KEY}' to be set`
-      )
-      return
-    }
-
-    let projects = getProjectsFromDirectories(directories)
-    let validProjectKeys = new Set(Object.keys(projects))
-
-    if (!vscode.workspace.workspaceFolders && validProjectKeys.size === 0) {
-      vscode.window.showErrorMessage("Project Switcher requires at least one folder to be open.")
-      return
-    }
-
-    let recentlyAccessedProjects = context.globalState
-      .get("simple-project-switcher.recent", [])
-      .filter(p => validProjectKeys.has(p))
-    context.globalState.update("simple-project-switcher.recent", recentlyAccessedProjects)
-
-    let projectsSortedByRecentlyAccessed = Array.from(new Set(recentlyAccessedProjects.concat(Object.keys(projects))))
-
-    const quickPick = vscode.window.createQuickPick()
-
-    quickPick.items = projectsSortedByRecentlyAccessed.map(project => ({
-      label: project,
-    }))
-
-    quickPick.onDidChangeSelection(selections => {
-      let project = selections[0].label
-      if (!project) return
-      updateMostRecentProject(context, project)
-
-      vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(projects[project]), true)
-    })
-    quickPick.onDidHide(() => quickPick.dispose())
-    quickPick.show()
+  const switchCommand = vscode.commands.registerCommand("simple-project-switcher.switch", () => {
+    showProjectPicker(context)
   })
 
-  let clearCacheCommand = vscode.commands.registerCommand("simple-project-switcher.clear_cache", () => {
-    context.globalState.update("simple-project-switcher.recent", [])
+  const clearCacheCommand = vscode.commands.registerCommand("simple-project-switcher.clear_cache", () => {
+    context.globalState.update(STATE_RECENT_PROJECTS, [])
   })
 
-  context.subscriptions.push(switchCommand)
-  context.subscriptions.push(clearCacheCommand)
+  context.subscriptions.push(switchCommand, clearCacheCommand)
 }
 
-function trackCurrentProject(context: vscode.ExtensionContext) {
+export function deactivate(): void {}
+
+// --- Commands ---
+
+function showProjectPicker(context: vscode.ExtensionContext): void {
+  const directories = getConfiguredDirectories()
+  if (!directories.length) {
+    vscode.window.showErrorMessage(
+      `The simple-project-switcher extension requires '${SETTING_PROJECT_DIRECTORIES}' to be set`
+    )
+    return
+  }
+
+  const projects = discoverProjects(directories)
+  const projectNames = new Set(Object.keys(projects))
+
+  if (!vscode.workspace.workspaceFolders && projectNames.size === 0) {
+    vscode.window.showErrorMessage("Project Switcher requires at least one folder to be open.")
+    return
+  }
+
+  const recentProjects = pruneRecentProjects(context, projectNames)
+  const sortedNames = Array.from(new Set([...recentProjects, ...projectNames]))
+
+  const quickPick = vscode.window.createQuickPick()
+  quickPick.items = sortedNames.map(name => ({ label: name }))
+
+  quickPick.onDidChangeSelection(selections => {
+    const selected = selections[0]?.label
+    if (!selected) return
+
+    pushRecentProject(context, selected)
+    vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(projects[selected]), true)
+  })
+
+  quickPick.onDidHide(() => quickPick.dispose())
+  quickPick.show()
+}
+
+// --- Recent Project Tracking ---
+
+function trackCurrentProject(context: vscode.ExtensionContext): void {
   const folders = vscode.workspace.workspaceFolders
   if (!folders) return
 
-  const directories = config(PROJECT_DIRECTORTIES_SETTING_KEY, [])
+  const directories = getConfiguredDirectories()
   if (!directories.length) return
 
   for (const folder of folders) {
     const folderPath = normalizePath(folder.uri.path)
-    const matchedRoot = findMatchingRoot(directories, folderPath)
+    const matchedRoot = findLongestMatchingRoot(directories, folderPath)
     if (matchedRoot) {
-      const currentProjectDirectory = pathRelativeToProjectDirectory(matchedRoot, folderPath)
-      updateMostRecentProject(context, currentProjectDirectory)
-      vscode.window.onDidChangeWindowState(function (event) {
-        if (event.focused) updateMostRecentProject(context, currentProjectDirectory)
+      const projectLabel = toProjectLabel(matchedRoot, folderPath)
+      pushRecentProject(context, projectLabel)
+      vscode.window.onDidChangeWindowState(event => {
+        if (event.focused) pushRecentProject(context, projectLabel)
       })
       break
     }
   }
 }
 
-const MAX_SCAN_DEPTH = 5
+function pushRecentProject(context: vscode.ExtensionContext, project: string): void {
+  const normalized = normalizePath(project)
+  const recent: string[] = context.globalState.get(STATE_RECENT_PROJECTS, [])
+  const updated = [normalized, ...recent.filter(p => p !== normalized)]
 
-function getExcludedDirectories() {
-  const excludePatterns = vscode.workspace.getConfiguration("search").get("exclude", {})
-  const excluded = new Set<string>()
-  for (const [pattern, enabled] of Object.entries(excludePatterns)) {
-    if (!enabled) continue
-    // Extract directory name from patterns like "**/node_modules" or "node_modules"
-    const match = pattern.match(/^(?:\*\*\/)?([^/*]+)$/)
-    if (match) excluded.add(match[1])
-  }
-  return excluded
+  context.globalState.update(STATE_FOCUSED_PROJECT, normalized)
+  context.globalState.update(STATE_RECENT_PROJECTS, updated)
 }
 
-function getProjectsFromDirectories(directories) {
-  const labelToPath = {}
-  const labelCount = {}
+function pruneRecentProjects(context: vscode.ExtensionContext, validNames: Set<string>): string[] {
+  const recent: string[] = context.globalState.get(STATE_RECENT_PROJECTS, [])
+  const pruned = recent.filter(p => validNames.has(p))
+  context.globalState.update(STATE_RECENT_PROJECTS, pruned)
+  return pruned
+}
+
+// --- Project Discovery ---
+
+function discoverProjects(directories: string[]): Record<string, string> {
+  const labelToPath: Record<string, string> = {}
+  const labelCount: Record<string, number> = {}
   const excluded = getExcludedDirectories()
 
-  directories.forEach(projectDirectory => {
-    let root = normalizePath(projectDirectory)
-    scanForProjects(root, root, 0, labelToPath, labelCount, excluded)
-  })
+  for (const dir of directories) {
+    const root = normalizePath(dir)
+    scanForProjects(root, root, 0, excluded, labelToPath, labelCount)
+  }
 
-  const projects = {}
+  const projects: Record<string, string> = {}
   for (const [path, label] of Object.entries(labelToPath)) {
-    const key = labelCount[label as string] > 1 ? `${label} (${path})` : label
-    projects[key as string] = path
+    const key = labelCount[label] > 1 ? `${label} (${path})` : label
+    projects[key] = path
   }
   return projects
 }
 
-function scanForProjects(root, directory, depth, labelToPath, labelCount, excluded) {
+function scanForProjects(
+  root: string,
+  directory: string,
+  depth: number,
+  excluded: Set<string>,
+  labelToPath: Record<string, string>,
+  labelCount: Record<string, number>,
+): void {
   if (depth >= MAX_SCAN_DEPTH) return
 
-  let entries
+  let entries: string[]
   try {
     entries = readdirSync(directory)
   } catch {
     return
   }
 
-  entries.forEach(name => {
-    if (name.startsWith(".") || excluded.has(name)) return
-    let path = normalizePath(join(directory, name))
+  for (const name of entries) {
+    if (name.startsWith(".") || excluded.has(name)) continue
+
+    const path = normalizePath(join(directory, name))
     try {
-      if (!statSync(path).isDirectory()) return
+      if (!statSync(path).isDirectory()) continue
     } catch {
-      return
+      continue
     }
 
     if (existsSync(join(path, ".git"))) {
-      const label = pathRelativeToProjectDirectory(root, path)
+      const label = toProjectLabel(root, path)
       labelCount[label] = (labelCount[label] || 0) + 1
       labelToPath[path] = label
     } else {
-      scanForProjects(root, path, depth + 1, labelToPath, labelCount)
+      scanForProjects(root, path, depth + 1, excluded, labelToPath, labelCount)
     }
-  })
+  }
 }
 
-function pathRelativeToProjectDirectory(projectDirectory, path) {
-  return relative(join(projectDirectory, ".."), path)
+// --- Configuration ---
+
+function getConfiguredDirectories(): string[] {
+  return vscode.workspace.getConfiguration().get(SETTING_PROJECT_DIRECTORIES) || []
 }
 
-function updateMostRecentProject(context, currentProject) {
-  currentProject = normalizePath(currentProject)
-
-  context.globalState.update("simple-project-switcher.focused", currentProject)
-
-  let recentlyAccessedProjects = context.globalState.get("simple-project-switcher.recent", [])
-
-  recentlyAccessedProjects.unshift(normalizePath(currentProject))
-
-  context.globalState.update("simple-project-switcher.recent", Array.from(new Set(recentlyAccessedProjects)))
+function getExcludedDirectories(): Set<string> {
+  const patterns: Record<string, boolean> = vscode.workspace.getConfiguration("search").get("exclude", {})
+  const excluded = new Set<string>()
+  for (const [pattern, enabled] of Object.entries(patterns)) {
+    if (!enabled) continue
+    const match = pattern.match(/^(?:\*\*\/)?([^/*]+)$/)
+    if (match) excluded.add(match[1])
+  }
+  return excluded
 }
 
-function config(setting, fallback) {
-  return vscode.workspace.getConfiguration().get(setting) || fallback
-}
+// --- Path Utilities ---
 
-function findMatchingRoot(directories, windowPath) {
-  let bestMatch = undefined
+function findLongestMatchingRoot(directories: string[], windowPath: string): string | undefined {
+  let bestMatch: string | undefined
   for (const directory of directories) {
-    const normalizedDirectory = normalizePath(directory)
-    const dirWithTrailingSlash = normalizedDirectory.endsWith("/") ? normalizedDirectory : normalizedDirectory + "/"
-    if (windowPath.startsWith(dirWithTrailingSlash)) {
-      if (!bestMatch || normalizedDirectory.length > bestMatch.length) {
-        bestMatch = normalizedDirectory
-      }
+    const normalized = normalizePath(directory)
+    const withSlash = normalized.endsWith("/") ? normalized : normalized + "/"
+    if (windowPath.startsWith(withSlash) && (!bestMatch || normalized.length > bestMatch.length)) {
+      bestMatch = normalized
     }
   }
   return bestMatch
 }
 
-function normalizePath(path) {
-  path = untildify(path)
-  // Strip leading slash before Windows drive letters (e.g. /C:/ -> C:/)
-  path = path.replace(/^\/([a-zA-Z]):\//, "$1:/")
-  // Convert backslashes from windows paths to forward slashes, otherwise the shell will ignore them.
-  return path.replace(/\\/g, "/")
+function toProjectLabel(root: string, projectPath: string): string {
+  return relative(join(root, ".."), projectPath)
 }
 
-export function deactivate() {
-  //
+function normalizePath(path: string): string {
+  path = untildify(path)
+  path = path.replace(/^\/([a-zA-Z]):\//, "$1:/")
+  return path.replace(/\\/g, "/")
 }
