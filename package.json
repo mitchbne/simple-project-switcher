@@ -2,15 +2,14 @@
     "name": "simple-project-switcher",
     "displayName": "Simple Project Switcher",
     "description": "An extension to switch between projects in VS Code",
-    "version": "0.1.7",
+    "version": "1.0.0",
     "publisher": "mitchbne",
     "repository": {
         "type": "git",
         "url": "https://github.com/mitchbne/simple-project-switcher.git"
     },
     "engines": {
-        "node": ">=24",
-        "vscode": "^1.44.0"
+        "vscode": "^1.75.0"
     },
     "categories": [
         "Other"
@@ -68,18 +67,14 @@
     "scripts": {
         "vscode:prepublish": "npm run compile",
         "compile": "tsc -p ./",
-        "watch": "tsc -watch -p ./",
-        "postinstall": "node ./node_modules/vscode/bin/install",
-        "test": "npm run compile && node ./node_modules/vscode/bin/test"
+        "watch": "tsc -watch -p ./"
     },
     "devDependencies": {
-        "typescript": "^2.5.3",
-        "vscode": "^1.1.5",
-        "@types/node": "^24.0.0",
-        "@types/mocha": "^2.2.42"
+        "typescript": "^5.5.0",
+        "@types/vscode": "^1.75.0",
+        "@types/node": "^20.0.0"
     },
     "dependencies": {
-        "find-up": "^4.1.0",
         "untildify": "^4.0.0"
     }
 }

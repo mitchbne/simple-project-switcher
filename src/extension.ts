@@ -1,7 +1,7 @@
 "use strict"
 
 import * as vscode from "vscode"
-import { existsSync, statSync, readdirSync } from "fs"
+import { Dirent, readdirSync } from "fs"
 import { join, relative } from "path"
 import untildify = require("untildify")
 
@@ -134,29 +134,34 @@ function scanForProjects(
 ): void {
   if (depth >= MAX_SCAN_DEPTH) return
 
-  let entries: string[]
+  let entries: Dirent[]
   try {
-    entries = readdirSync(directory)
+    entries = readdirSync(directory, { withFileTypes: true })
   } catch {
     return
   }
 
-  for (const name of entries) {
-    if (name.startsWith(".") || excluded.has(name)) continue
+  let hasGit = false
+  const subdirectories: Dirent[] = []
 
-    const path = normalizePath(join(directory, name))
-    try {
-      if (!statSync(path).isDirectory()) continue
-    } catch {
-      continue
+  for (const entry of entries) {
+    if (entry.name === ".git") {
+      hasGit = true
+      break
     }
+    if (entry.isDirectory() && !entry.name.startsWith(".") && !excluded.has(entry.name)) {
+      subdirectories.push(entry)
+    }
+  }
 
-    if (existsSync(join(path, ".git"))) {
-      const label = toProjectLabel(root, path)
-      labelCount[label] = (labelCount[label] || 0) + 1
-      labelToPath[path] = label
-    } else {
-      scanForProjects(root, path, depth + 1, excluded, labelToPath, labelCount)
+  if (hasGit) {
+    const path = normalizePath(directory)
+    const label = toProjectLabel(root, path)
+    labelCount[label] = (labelCount[label] || 0) + 1
+    labelToPath[path] = label
+  } else {
+    for (const entry of subdirectories) {
+      scanForProjects(root, join(directory, entry.name), depth + 1, excluded, labelToPath, labelCount)
     }
   }
 }
