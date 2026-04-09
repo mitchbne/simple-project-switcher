@@ -16,7 +16,8 @@
     ],
     "icon": "icon.png",
     "activationEvents": [
-        "*"
+        "onCommand:simple-project-switcher.switch",
+        "onCommand:simple-project-switcher.clear_cache"
     ],
     "main": "./out/extension",
     "contributes": {
